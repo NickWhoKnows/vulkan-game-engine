@@ -1,19 +1,24 @@
 #pragma once
 
+#include "assets/AssetManager.hpp"
 #include "vulkan/Context.hpp"
 
+#include <imgui.h>
+
 #include <cstdint>
+#include <memory>
+#include <unordered_map>
 #include <vector>
 
-struct GLFWwindow;
-
 namespace vlk {
+
+class ImGuiLayer;
 
 class Renderer {
   public:
     static constexpr int kMaxFramesInFlight = 2;
 
-    Renderer(Context &context, GLFWwindow *window);
+    Renderer(Context &context, GLFWwindow *window, AssetManager &assets);
     ~Renderer();
 
     Renderer(const Renderer &) = delete;
@@ -28,26 +33,37 @@ class Renderer {
         VkDeviceMemory memory = VK_NULL_HANDLE;
     };
 
+    struct MeshGpuBuffers {
+        Buffer vertexBuffer{};
+        Buffer indexBuffer{};
+        uint32_t indexCount = 0;
+    };
+
     void createSwapchain(VkSwapchainKHR oldSwapchain);
-    void createDepthResources();
+    void createViewportResources();
+    void destroyViewportResources();
+    void ensureViewportSize(uint32_t width, uint32_t height);
     void createPipeline();
-    void createMeshBuffers();
+    void uploadMeshAssets();
     void createCommandBuffers();
     void createSyncObjects();
     void createPresentSemaphores();
     void destroyPresentSemaphores();
-    void destroyDepthResources();
     void destroySwapchainViews();
     void cleanupSwapchain();
     void recreateSwapchain();
-    void record(VkCommandBuffer commandBuffer, uint32_t imageIndex, const float *mvp);
+    void updateViewportImGuiTexture();
+    void record(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 
     Buffer createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
     void uploadBuffer(Buffer &buffer, const void *data, VkDeviceSize size);
     void destroyBuffer(Buffer &buffer);
+    void destroyMeshBuffers();
 
     Context &context_;
+    AssetManager &assets_;
     GLFWwindow *window_ = nullptr;
+    std::unique_ptr<ImGuiLayer> imgui_;
 
     VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
     VkFormat swapchainFormat_ = VK_FORMAT_UNDEFINED;
@@ -56,16 +72,21 @@ class Renderer {
     std::vector<VkImageView> swapchainImageViews_;
 
     VkFormat depthFormat_ = VK_FORMAT_UNDEFINED;
-    VkImage depthImage_ = VK_NULL_HANDLE;
-    VkDeviceMemory depthMemory_ = VK_NULL_HANDLE;
-    VkImageView depthImageView_ = VK_NULL_HANDLE;
+    VkExtent2D viewportExtent_{};
+    VkImage viewportColorImage_ = VK_NULL_HANDLE;
+    VkDeviceMemory viewportColorMemory_ = VK_NULL_HANDLE;
+    VkImageView viewportColorView_ = VK_NULL_HANDLE;
+    VkImage viewportDepthImage_ = VK_NULL_HANDLE;
+    VkDeviceMemory viewportDepthMemory_ = VK_NULL_HANDLE;
+    VkImageView viewportDepthImageView_ = VK_NULL_HANDLE;
+    VkSampler viewportSampler_ = VK_NULL_HANDLE;
+    VkDescriptorSet viewportDescriptor_ = VK_NULL_HANDLE;
+    ImTextureID viewportTextureId_ = 0;
 
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE;
 
-    Buffer vertexBuffer_{};
-    Buffer indexBuffer_{};
-    uint32_t indexCount_ = 0;
+    std::unordered_map<AssetId, MeshGpuBuffers> meshBuffers_;
 
     std::vector<VkCommandBuffer> commandBuffers_;
     std::vector<VkSemaphore> imageAvailable_;
@@ -73,6 +94,9 @@ class Renderer {
     std::vector<VkFence> inFlight_;
     uint32_t currentFrame_ = 0;
     bool framebufferResized_ = false;
+    float viewportUiWidth_ = 640.0f;
+    float viewportUiHeight_ = 480.0f;
+    VkImageLayout viewportColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
 };
 
 } // namespace vlk

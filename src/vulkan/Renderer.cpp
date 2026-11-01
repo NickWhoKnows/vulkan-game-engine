@@ -1,9 +1,15 @@
 #include "vulkan/Renderer.hpp"
 
+#include "assets/MeshAsset.hpp"
+#include "assets/Scene.hpp"
+#include "editor/EditorUI.hpp"
 #include "vulkan/Check.hpp"
+#include "vulkan/ImGuiLayer.hpp"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+
+#include <backends/imgui_impl_vulkan.h>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -21,36 +27,6 @@
 
 namespace vlk {
 namespace {
-
-struct Vertex {
-    float position[3];
-    float color[3];
-};
-
-constexpr Vertex kVertices[] = {
-    {{-0.5f, -0.5f, 0.5f}, {0.90f, 0.25f, 0.25f}},  {{0.5f, -0.5f, 0.5f}, {0.90f, 0.25f, 0.25f}},
-    {{0.5f, 0.5f, 0.5f}, {0.90f, 0.25f, 0.25f}},    {{-0.5f, 0.5f, 0.5f}, {0.90f, 0.25f, 0.25f}},
-
-    {{0.5f, -0.5f, -0.5f}, {0.25f, 0.80f, 0.35f}},  {{-0.5f, -0.5f, -0.5f}, {0.25f, 0.80f, 0.35f}},
-    {{-0.5f, 0.5f, -0.5f}, {0.25f, 0.80f, 0.35f}},  {{0.5f, 0.5f, -0.5f}, {0.25f, 0.80f, 0.35f}},
-
-    {{0.5f, -0.5f, 0.5f}, {0.25f, 0.45f, 0.95f}},   {{0.5f, -0.5f, -0.5f}, {0.25f, 0.45f, 0.95f}},
-    {{0.5f, 0.5f, -0.5f}, {0.25f, 0.45f, 0.95f}},   {{0.5f, 0.5f, 0.5f}, {0.25f, 0.45f, 0.95f}},
-
-    {{-0.5f, -0.5f, -0.5f}, {0.95f, 0.80f, 0.20f}}, {{-0.5f, -0.5f, 0.5f}, {0.95f, 0.80f, 0.20f}},
-    {{-0.5f, 0.5f, 0.5f}, {0.95f, 0.80f, 0.20f}},   {{-0.5f, 0.5f, -0.5f}, {0.95f, 0.80f, 0.20f}},
-
-    {{-0.5f, 0.5f, 0.5f}, {0.20f, 0.85f, 0.90f}},   {{0.5f, 0.5f, 0.5f}, {0.20f, 0.85f, 0.90f}},
-    {{0.5f, 0.5f, -0.5f}, {0.20f, 0.85f, 0.90f}},   {{-0.5f, 0.5f, -0.5f}, {0.20f, 0.85f, 0.90f}},
-
-    {{-0.5f, -0.5f, -0.5f}, {0.85f, 0.30f, 0.75f}}, {{0.5f, -0.5f, -0.5f}, {0.85f, 0.30f, 0.75f}},
-    {{0.5f, -0.5f, 0.5f}, {0.85f, 0.30f, 0.75f}},   {{-0.5f, -0.5f, 0.5f}, {0.85f, 0.30f, 0.75f}},
-};
-
-constexpr uint16_t kIndices[] = {
-    0,  1,  2,  2,  3,  0,  4,  5,  6,  6,  7,  4,  8,  9,  10, 10, 11, 8,
-    12, 13, 14, 14, 15, 12, 16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20,
-};
 
 std::vector<char> readFile(const std::string &path) {
     std::ifstream file(path, std::ios::ate | std::ios::binary);
@@ -125,6 +101,10 @@ VkFormat findDepthFormat(VkPhysicalDevice physicalDevice) {
 
 void transitionImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
                      VkImageAspectFlags aspect) {
+    if (oldLayout == newLayout) {
+        return;
+    }
+
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout = oldLayout;
@@ -144,6 +124,18 @@ void transitionImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout
         barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+               newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        sourceStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
+               newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     } else if (oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
         barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         barrier.dstAccessMask = 0;
@@ -179,21 +171,36 @@ VkImageView createImageView(VkDevice device, VkImage image, VkFormat format, VkI
 
 } // namespace
 
-Renderer::Renderer(Context &context, GLFWwindow *window) : context_(context), window_(window) {
+Renderer::Renderer(Context &context, GLFWwindow *window, AssetManager &assets)
+    : context_(context), assets_(assets), window_(window) {
     depthFormat_ = findDepthFormat(context_.physicalDevice());
     createSwapchain(VK_NULL_HANDLE);
-    createDepthResources();
     createPipeline();
-    createMeshBuffers();
+    uploadMeshAssets();
+    createViewportResources();
     createCommandBuffers();
     createSyncObjects();
     createPresentSemaphores();
+    imgui_ = std::make_unique<ImGuiLayer>(context_, window_, swapchainFormat_,
+                                          static_cast<uint32_t>(swapchainImages_.size()));
+    updateViewportImGuiTexture();
 }
 
 Renderer::~Renderer() {
     context_.waitIdle();
 
+    imgui_.reset();
+
+    if (viewportDescriptor_ != VK_NULL_HANDLE) {
+        ImGui_ImplVulkan_RemoveTexture(viewportDescriptor_);
+        viewportDescriptor_ = VK_NULL_HANDLE;
+    }
+
     const VkDevice device = context_.device();
+    if (viewportSampler_ != VK_NULL_HANDLE) {
+        vkDestroySampler(device, viewportSampler_, nullptr);
+    }
+
     for (std::size_t frame = 0; frame < imageAvailable_.size(); ++frame) {
         vkDestroySemaphore(device, imageAvailable_[frame], nullptr);
         vkDestroyFence(device, inFlight_[frame], nullptr);
@@ -205,8 +212,8 @@ Renderer::~Renderer() {
                              commandBuffers_.data());
     }
 
-    destroyBuffer(vertexBuffer_);
-    destroyBuffer(indexBuffer_);
+    destroyMeshBuffers();
+    destroyViewportResources();
     vkDestroyPipeline(device, pipeline_, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout_, nullptr);
     cleanupSwapchain();
@@ -228,24 +235,26 @@ void Renderer::draw() {
         recreateSwapchain();
         return;
     }
+
     if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error("failed to acquire swapchain image");
     }
 
     vkResetFences(device, 1, &inFlight_[currentFrame_]);
 
-    const float aspect = swapchainExtent_.height == 0
-                             ? 1.0f
-                             : static_cast<float>(swapchainExtent_.width) / static_cast<float>(swapchainExtent_.height);
+    ensureViewportSize(static_cast<uint32_t>(viewportUiWidth_), static_cast<uint32_t>(viewportUiHeight_));
 
-    const glm::mat4 view =
-        glm::lookAt(glm::vec3(2.2f, 2.0f, 2.2f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-    glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 20.0f);
-    projection[1][1] *= -1.0f;
-    const glm::mat4 mvp = projection * view;
+    imgui_->newFrame();
+    EditorViewport editorViewport{};
+    editorViewport.texture = viewportTextureId_;
+    buildEditorUI(assets_, editorViewport);
+    viewportUiWidth_ = editorViewport.width;
+    viewportUiHeight_ = editorViewport.height;
+
+    ImGui::Render();
 
     vkResetCommandBuffer(commandBuffers_[currentFrame_], 0);
-    record(commandBuffers_[currentFrame_], imageIndex, &mvp[0][0]);
+    record(commandBuffers_[currentFrame_], imageIndex);
 
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submitInfo{};
@@ -337,40 +346,138 @@ void Renderer::createSwapchain(VkSwapchainKHR oldSwapchain) {
     }
 }
 
-void Renderer::createDepthResources() {
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent = {swapchainExtent_.width, swapchainExtent_.height, 1};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = depthFormat_;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
+void Renderer::createViewportResources() {
     const VkDevice device = context_.device();
-    check(vkCreateImage(device, &imageInfo, nullptr, &depthImage_), "failed to create depth image");
+    viewportExtent_.width = std::max(1u, static_cast<uint32_t>(viewportUiWidth_));
+    viewportExtent_.height = std::max(1u, static_cast<uint32_t>(viewportUiHeight_));
 
-    VkMemoryRequirements requirements{};
-    vkGetImageMemoryRequirements(device, depthImage_, &requirements);
+    VkImageCreateInfo colorInfo{};
+    colorInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    colorInfo.imageType = VK_IMAGE_TYPE_2D;
+    colorInfo.extent = {viewportExtent_.width, viewportExtent_.height, 1};
+    colorInfo.mipLevels = 1;
+    colorInfo.arrayLayers = 1;
+    colorInfo.format = swapchainFormat_;
+    colorInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    colorInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    colorInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    check(vkCreateImage(device, &colorInfo, nullptr, &viewportColorImage_), "failed to create viewport color image");
 
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = requirements.size;
-    allocInfo.memoryTypeIndex =
-        context_.findMemoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    check(vkAllocateMemory(device, &allocInfo, nullptr, &depthMemory_), "failed to allocate depth image memory");
-    check(vkBindImageMemory(device, depthImage_, depthMemory_, 0), "failed to bind depth image memory");
+    VkMemoryRequirements colorRequirements{};
+    vkGetImageMemoryRequirements(device, viewportColorImage_, &colorRequirements);
+    VkMemoryAllocateInfo colorAlloc{};
+    colorAlloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    colorAlloc.allocationSize = colorRequirements.size;
+    colorAlloc.memoryTypeIndex =
+        context_.findMemoryType(colorRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    check(vkAllocateMemory(device, &colorAlloc, nullptr, &viewportColorMemory_), "failed to allocate viewport memory");
+    check(vkBindImageMemory(device, viewportColorImage_, viewportColorMemory_, 0), "failed to bind viewport memory");
 
-    depthImageView_ = createImageView(device, depthImage_, depthFormat_, VK_IMAGE_ASPECT_DEPTH_BIT);
+    viewportColorView_ =
+        createImageView(device, viewportColorImage_, swapchainFormat_, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    VkImageCreateInfo depthInfo{};
+    depthInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    depthInfo.imageType = VK_IMAGE_TYPE_2D;
+    depthInfo.extent = {viewportExtent_.width, viewportExtent_.height, 1};
+    depthInfo.mipLevels = 1;
+    depthInfo.arrayLayers = 1;
+    depthInfo.format = depthFormat_;
+    depthInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    depthInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    depthInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    check(vkCreateImage(device, &depthInfo, nullptr, &viewportDepthImage_), "failed to create viewport depth image");
+
+    VkMemoryRequirements depthRequirements{};
+    vkGetImageMemoryRequirements(device, viewportDepthImage_, &depthRequirements);
+    VkMemoryAllocateInfo depthAlloc{};
+    depthAlloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    depthAlloc.allocationSize = depthRequirements.size;
+    depthAlloc.memoryTypeIndex =
+        context_.findMemoryType(depthRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    check(vkAllocateMemory(device, &depthAlloc, nullptr, &viewportDepthMemory_), "failed to allocate viewport depth");
+    check(vkBindImageMemory(device, viewportDepthImage_, viewportDepthMemory_, 0), "failed to bind viewport depth");
+
+    viewportDepthImageView_ =
+        createImageView(device, viewportDepthImage_, depthFormat_, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    check(vkCreateSampler(device, &samplerInfo, nullptr, &viewportSampler_), "failed to create viewport sampler");
 
     VkCommandBuffer commandBuffer = context_.beginSingleTimeCommands();
-    transitionImage(commandBuffer, depthImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+    transitionImage(commandBuffer, viewportDepthImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                     VK_IMAGE_ASPECT_DEPTH_BIT);
     context_.endSingleTimeCommands(commandBuffer);
+}
+
+void Renderer::destroyViewportResources() {
+    const VkDevice device = context_.device();
+    if (viewportColorView_ != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, viewportColorView_, nullptr);
+        viewportColorView_ = VK_NULL_HANDLE;
+    }
+    if (viewportColorImage_ != VK_NULL_HANDLE) {
+        vkDestroyImage(device, viewportColorImage_, nullptr);
+        viewportColorImage_ = VK_NULL_HANDLE;
+    }
+    if (viewportColorMemory_ != VK_NULL_HANDLE) {
+        vkFreeMemory(device, viewportColorMemory_, nullptr);
+        viewportColorMemory_ = VK_NULL_HANDLE;
+    }
+    if (viewportDepthImageView_ != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, viewportDepthImageView_, nullptr);
+        viewportDepthImageView_ = VK_NULL_HANDLE;
+    }
+    if (viewportDepthImage_ != VK_NULL_HANDLE) {
+        vkDestroyImage(device, viewportDepthImage_, nullptr);
+        viewportDepthImage_ = VK_NULL_HANDLE;
+    }
+    if (viewportDepthMemory_ != VK_NULL_HANDLE) {
+        vkFreeMemory(device, viewportDepthMemory_, nullptr);
+        viewportDepthMemory_ = VK_NULL_HANDLE;
+    }
+}
+
+void Renderer::ensureViewportSize(uint32_t width, uint32_t height) {
+    width = std::max(1u, width);
+    height = std::max(1u, height);
+    if (width == viewportExtent_.width && height == viewportExtent_.height) {
+        return;
+    }
+
+    context_.waitIdle();
+    if (viewportDescriptor_ != VK_NULL_HANDLE) {
+        ImGui_ImplVulkan_RemoveTexture(viewportDescriptor_);
+        viewportDescriptor_ = VK_NULL_HANDLE;
+        viewportTextureId_ = 0;
+    }
+
+    destroyViewportResources();
+    viewportColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    viewportUiWidth_ = static_cast<float>(width);
+    viewportUiHeight_ = static_cast<float>(height);
+    createViewportResources();
+    updateViewportImGuiTexture();
+}
+
+void Renderer::updateViewportImGuiTexture() {
+    if (viewportColorView_ == VK_NULL_HANDLE || viewportSampler_ == VK_NULL_HANDLE) {
+        return;
+    }
+
+    viewportDescriptor_ = ImGui_ImplVulkan_AddTexture(viewportSampler_, viewportColorView_,
+                                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    viewportTextureId_ = static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(viewportDescriptor_));
 }
 
 void Renderer::createPipeline() {
@@ -492,15 +599,32 @@ void Renderer::createPipeline() {
     vkDestroyShaderModule(context_.device(), fragmentShader, nullptr);
 }
 
-void Renderer::createMeshBuffers() {
-    vertexBuffer_ = createBuffer(sizeof(kVertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    uploadBuffer(vertexBuffer_, kVertices, sizeof(kVertices));
+void Renderer::uploadMeshAssets() {
+    for (const MeshAsset &meshAsset : assets_.meshes()) {
+        MeshGpuBuffers gpu{};
+        const MeshData &mesh = meshAsset.mesh;
+        const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(mesh.vertices.size() * sizeof(Vertex));
+        const VkDeviceSize indexBytes = static_cast<VkDeviceSize>(mesh.indices.size() * sizeof(uint16_t));
 
-    indexBuffer_ = createBuffer(sizeof(kIndices), VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    uploadBuffer(indexBuffer_, kIndices, sizeof(kIndices));
-    indexCount_ = static_cast<uint32_t>(std::size(kIndices));
+        gpu.vertexBuffer = createBuffer(vertexBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        uploadBuffer(gpu.vertexBuffer, mesh.vertices.data(), vertexBytes);
+
+        gpu.indexBuffer = createBuffer(indexBytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        uploadBuffer(gpu.indexBuffer, mesh.indices.data(), indexBytes);
+        gpu.indexCount = static_cast<uint32_t>(mesh.indices.size());
+        meshBuffers_.emplace(meshAsset.id, gpu);
+    }
+}
+
+void Renderer::destroyMeshBuffers() {
+    for (auto &[id, buffers] : meshBuffers_) {
+        (void)id;
+        destroyBuffer(buffers.vertexBuffer);
+        destroyBuffer(buffers.indexBuffer);
+    }
+    meshBuffers_.clear();
 }
 
 void Renderer::createCommandBuffers() {
@@ -551,22 +675,6 @@ void Renderer::destroyPresentSemaphores() {
     renderFinished_.clear();
 }
 
-void Renderer::destroyDepthResources() {
-    const VkDevice device = context_.device();
-    if (depthImageView_ != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, depthImageView_, nullptr);
-        depthImageView_ = VK_NULL_HANDLE;
-    }
-    if (depthImage_ != VK_NULL_HANDLE) {
-        vkDestroyImage(device, depthImage_, nullptr);
-        depthImage_ = VK_NULL_HANDLE;
-    }
-    if (depthMemory_ != VK_NULL_HANDLE) {
-        vkFreeMemory(device, depthMemory_, nullptr);
-        depthMemory_ = VK_NULL_HANDLE;
-    }
-}
-
 void Renderer::destroySwapchainViews() {
     const VkDevice device = context_.device();
     for (VkImageView view : swapchainImageViews_) {
@@ -577,7 +685,6 @@ void Renderer::destroySwapchainViews() {
 }
 
 void Renderer::cleanupSwapchain() {
-    destroyDepthResources();
     destroySwapchainViews();
 
     if (swapchain_ != VK_NULL_HANDLE) {
@@ -597,27 +704,33 @@ void Renderer::recreateSwapchain() {
 
     context_.waitIdle();
     destroyPresentSemaphores();
-    destroyDepthResources();
     destroySwapchainViews();
 
     const VkSwapchainKHR oldSwapchain = swapchain_;
     createSwapchain(oldSwapchain);
-    vkDestroySwapchainKHR(context_.device(), oldSwapchain, nullptr);
-    createDepthResources();
+    if (oldSwapchain != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(context_.device(), oldSwapchain, nullptr);
+    }
     createPresentSemaphores();
+
+    if (imgui_) {
+        imgui_->onSwapchainRecreated(swapchainFormat_, static_cast<uint32_t>(swapchainImages_.size()));
+        updateViewportImGuiTexture();
+    }
 }
 
-void Renderer::record(VkCommandBuffer commandBuffer, uint32_t imageIndex, const float *mvp) {
+void Renderer::record(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     check(vkBeginCommandBuffer(commandBuffer, &beginInfo), "failed to begin command buffer");
 
-    transitionImage(commandBuffer, swapchainImages_[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+    transitionImage(commandBuffer, viewportColorImage_, viewportColorLayout_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT);
+    viewportColorLayout_ = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     VkRenderingAttachmentInfo colorAttachment{};
     colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorAttachment.imageView = swapchainImageViews_[imageIndex];
+    colorAttachment.imageView = viewportColorView_;
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -625,42 +738,88 @@ void Renderer::record(VkCommandBuffer commandBuffer, uint32_t imageIndex, const 
 
     VkRenderingAttachmentInfo depthAttachment{};
     depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = depthImageView_;
+    depthAttachment.imageView = viewportDepthImageView_;
     depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.clearValue.depthStencil = {1.0f, 0};
 
-    VkRenderingInfo renderingInfo{};
-    renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    renderingInfo.renderArea.offset = {0, 0};
-    renderingInfo.renderArea.extent = swapchainExtent_;
-    renderingInfo.layerCount = 1;
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachments = &colorAttachment;
-    renderingInfo.pDepthAttachment = &depthAttachment;
+    VkRenderingInfo sceneRendering{};
+    sceneRendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    sceneRendering.renderArea.offset = {0, 0};
+    sceneRendering.renderArea.extent = viewportExtent_;
+    sceneRendering.layerCount = 1;
+    sceneRendering.colorAttachmentCount = 1;
+    sceneRendering.pColorAttachments = &colorAttachment;
+    sceneRendering.pDepthAttachment = &depthAttachment;
 
-    vkCmdBeginRendering(commandBuffer, &renderingInfo);
-
+    vkCmdBeginRendering(commandBuffer, &sceneRendering);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
 
     VkViewport viewport{};
-    viewport.width = static_cast<float>(swapchainExtent_.width);
-    viewport.height = static_cast<float>(swapchainExtent_.height);
+    viewport.width = static_cast<float>(viewportExtent_.width);
+    viewport.height = static_cast<float>(viewportExtent_.height);
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
     VkRect2D scissor{};
-    scissor.extent = swapchainExtent_;
+    scissor.extent = viewportExtent_;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-    const VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer_.handle, &offset);
-    vkCmdBindIndexBuffer(commandBuffer, indexBuffer_.handle, 0, VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(commandBuffer, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), mvp);
-    vkCmdDrawIndexed(commandBuffer, indexCount_, 1, 0, 0, 0);
+    const float aspect = viewportExtent_.height == 0
+                             ? 1.0f
+                             : static_cast<float>(viewportExtent_.width) / static_cast<float>(viewportExtent_.height);
+    const glm::mat4 view =
+        glm::lookAt(glm::vec3(2.2f, 2.0f, 2.2f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 20.0f);
+    projection[1][1] *= -1.0f;
+    const glm::mat4 viewProjection = projection * view;
 
+    if (const Scene *scene = assets_.activeScene()) {
+        for (const SceneObject &object : scene->objects) {
+            const auto meshIt = meshBuffers_.find(object.meshAssetId);
+            if (meshIt == meshBuffers_.end()) {
+                continue;
+            }
+
+            const MeshGpuBuffers &mesh = meshIt->second;
+            const glm::mat4 mvp = viewProjection;
+            const VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, &mesh.vertexBuffer.handle, &offset);
+            vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT16);
+            vkCmdPushConstants(commandBuffer, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &mvp);
+            vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+        }
+    }
+
+    vkCmdEndRendering(commandBuffer);
+
+    transitionImage(commandBuffer, viewportColorImage_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+    viewportColorLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    transitionImage(commandBuffer, swapchainImages_[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    VkRenderingAttachmentInfo swapColorAttachment{};
+    swapColorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    swapColorAttachment.imageView = swapchainImageViews_[imageIndex];
+    swapColorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    swapColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    swapColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    swapColorAttachment.clearValue.color = {{0.05f, 0.05f, 0.06f, 1.0f}};
+
+    VkRenderingInfo uiRendering{};
+    uiRendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    uiRendering.renderArea.offset = {0, 0};
+    uiRendering.renderArea.extent = swapchainExtent_;
+    uiRendering.layerCount = 1;
+    uiRendering.colorAttachmentCount = 1;
+    uiRendering.pColorAttachments = &swapColorAttachment;
+
+    vkCmdBeginRendering(commandBuffer, &uiRendering);
+    imgui_->renderDrawData(commandBuffer, swapchainExtent_);
     vkCmdEndRendering(commandBuffer);
 
     transitionImage(commandBuffer, swapchainImages_[imageIndex], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,

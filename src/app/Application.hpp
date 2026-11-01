@@ -4,29 +4,26 @@
 
 struct GLFWwindow;
 
-namespace vlk
-{
+namespace vlk {
 
+class AssetManager;
 class Context;
 class Renderer;
 
-class Application
-{
-public:
+class Application {
+  public:
     Application();
     ~Application();
-
-    Application(const Application&) = delete;
-    Application& operator=(const Application&) = delete;
-
+    Application(const Application &) = delete;
+    Application &operator=(const Application &) = delete;
     void run();
 
-private:
+  private:
     void initWindow();
+    static void framebufferResizeCallback(GLFWwindow *window, int width, int height);
 
-    static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
-
-    GLFWwindow* window_ = nullptr;
+    GLFWwindow *window_ = nullptr;
+    std::unique_ptr<AssetManager> assets_;
     std::unique_ptr<Context> context_;
     std::unique_ptr<Renderer> renderer_;
 };

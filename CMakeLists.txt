@@ -17,6 +17,29 @@ find_program(GLSLC_EXECUTABLE glslc
     REQUIRED
 )
 
+include(FetchContent)
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.91.6
+)
+FetchContent_MakeAvailable(imgui)
+
+add_library(imgui_lib STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+)
+target_include_directories(imgui_lib
+    PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+target_link_libraries(imgui_lib PUBLIC glfw Vulkan::Vulkan)
+
 set(SHADER_SOURCES
     shaders/cube.vert
     shaders/cube.frag
@@ -42,7 +65,11 @@ add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 add_executable(engine
     src/main.cpp
     src/app/Application.cpp
+    src/assets/AssetManager.cpp
+    src/assets/MeshData.cpp
+    src/editor/EditorUI.cpp
     src/vulkan/Context.cpp
+    src/vulkan/ImGuiLayer.cpp
     src/vulkan/Renderer.cpp
 )
 
@@ -64,4 +91,5 @@ target_link_libraries(engine
     PRIVATE
     Vulkan::Vulkan
     glfw
+    imgui_lib
 )

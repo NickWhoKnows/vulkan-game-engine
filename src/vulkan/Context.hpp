@@ -18,6 +18,7 @@ public:
     Context(const Context&) = delete;
     Context& operator=(const Context&) = delete;
 
+    VkInstance instance() const { return instance_; }
     VkDevice device() const { return device_; }
     VkPhysicalDevice physicalDevice() const { return physicalDevice_; }
     VkQueue graphicsQueue() const { return graphicsQueue_; }

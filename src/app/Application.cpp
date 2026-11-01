@@ -53,7 +53,7 @@ void Application::initWindow()
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
-    window_ = glfwCreateWindow(1280, 720, "Cube", nullptr, nullptr);
+    window_ = glfwCreateWindow(1280, 720, "Project Jans", nullptr, nullptr);
     if (!window_)
     {
         glfwTerminate();

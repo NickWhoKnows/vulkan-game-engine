@@ -23,7 +23,6 @@ public:
 
 private:
     void initWindow();
-    void mainLoop();
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
 

@@ -2,8 +2,6 @@
 
 Early development of **Project Jans**, a Vulkan-based game engine. The codebase is organized around a small runtime (`src/app`, `src/vulkan`) and will grow toward authoring tools and real-time gameplay rendering.
 
-The sample executable is still built as **`vlkprogram`** (CMake target name); that may change in a later rename pass.
-
 ## Current status
 
 The project currently boots a GLFW window and renders a simple colored cube at the origin using Vulkan dynamic rendering. This is the foundation for swapchain management, pipelines, and mesh drawing—not yet a full engine loop or asset pipeline.
@@ -64,7 +62,7 @@ cmake --build build
 ### Run
 
 ```bash
-./build/vlkprogram
+./build/engine
 ```
 
 ### Rebuild after code changes
@@ -107,7 +105,7 @@ ln -sf build/compile_commands.json compile_commands.json
 
 ## Build (summary)
 
-Shader GLSL under `shaders/` is compiled to SPIR-V in `build/shaders` during the build. The sample runtime executable is **`build/vlkprogram`**.
+Shader GLSL under `shaders/` is compiled to SPIR-V in `build/shaders` during the build. The runtime executable is **`build/engine`**.
 
 ## Phase 1 plan
 

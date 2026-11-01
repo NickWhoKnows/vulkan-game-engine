@@ -7,32 +7,28 @@
 
 struct GLFWwindow;
 
-namespace vlk
-{
+namespace vlk {
 
-class Renderer
-{
-public:
+class Renderer {
+  public:
     static constexpr int kMaxFramesInFlight = 2;
 
-    Renderer(Context& context, GLFWwindow* window);
+    Renderer(Context &context, GLFWwindow *window);
     ~Renderer();
 
-    Renderer(const Renderer&) = delete;
-    Renderer& operator=(const Renderer&) = delete;
+    Renderer(const Renderer &) = delete;
+    Renderer &operator=(const Renderer &) = delete;
 
     void draw();
     void notifyResized();
 
-private:
-    struct Buffer
-    {
+  private:
+    struct Buffer {
         VkBuffer handle = VK_NULL_HANDLE;
         VkDeviceMemory memory = VK_NULL_HANDLE;
     };
 
     void createSwapchain(VkSwapchainKHR oldSwapchain);
-    void createImageViews();
     void createDepthResources();
     void createPipeline();
     void createMeshBuffers();
@@ -40,16 +36,18 @@ private:
     void createSyncObjects();
     void createPresentSemaphores();
     void destroyPresentSemaphores();
+    void destroyDepthResources();
+    void destroySwapchainViews();
     void cleanupSwapchain();
     void recreateSwapchain();
-    void record(VkCommandBuffer commandBuffer, uint32_t imageIndex, const float* mvp);
+    void record(VkCommandBuffer commandBuffer, uint32_t imageIndex, const float *mvp);
 
     Buffer createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
-    void uploadBuffer(Buffer& buffer, const void* data, VkDeviceSize size);
-    void destroyBuffer(Buffer& buffer);
+    void uploadBuffer(Buffer &buffer, const void *data, VkDeviceSize size);
+    void destroyBuffer(Buffer &buffer);
 
-    Context& context_;
-    GLFWwindow* window_ = nullptr;
+    Context &context_;
+    GLFWwindow *window_ = nullptr;
 
     VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
     VkFormat swapchainFormat_ = VK_FORMAT_UNDEFINED;

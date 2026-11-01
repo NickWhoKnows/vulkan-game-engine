@@ -8,29 +8,20 @@
 
 #include <stdexcept>
 
-namespace vlk
-{
+namespace vlk {
 
-Application::Application()
-{
+Application::Application() {
     initWindow();
     context_ = std::make_unique<Context>(window_);
     renderer_ = std::make_unique<Renderer>(*context_, window_);
     glfwSetFramebufferSizeCallback(window_, framebufferResizeCallback);
 }
 
-Application::~Application()
-{
-    if (context_)
-    {
-        context_->waitIdle();
-    }
-
+Application::~Application() {
     renderer_.reset();
     context_.reset();
 
-    if (window_)
-    {
+    if (window_) {
         glfwDestroyWindow(window_);
         window_ = nullptr;
     }
@@ -38,15 +29,15 @@ Application::~Application()
     glfwTerminate();
 }
 
-void Application::run()
-{
-    mainLoop();
+void Application::run() {
+    while (!glfwWindowShouldClose(window_)) {
+        glfwPollEvents();
+        renderer_->draw();
+    }
 }
 
-void Application::initWindow()
-{
-    if (!glfwInit())
-    {
+void Application::initWindow() {
+    if (!glfwInit()) {
         throw std::runtime_error("failed to initialize GLFW");
     }
 
@@ -54,8 +45,7 @@ void Application::initWindow()
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     window_ = glfwCreateWindow(1280, 720, "Project Jans", nullptr, nullptr);
-    if (!window_)
-    {
+    if (!window_) {
         glfwTerminate();
         throw std::runtime_error("failed to create window");
     }
@@ -63,20 +53,9 @@ void Application::initWindow()
     glfwSetWindowUserPointer(window_, this);
 }
 
-void Application::mainLoop()
-{
-    while (!glfwWindowShouldClose(window_))
-    {
-        glfwPollEvents();
-        renderer_->draw();
-    }
-}
-
-void Application::framebufferResizeCallback(GLFWwindow* window, int, int)
-{
-    auto* app = static_cast<Application*>(glfwGetWindowUserPointer(window));
-    if (app && app->renderer_)
-    {
+void Application::framebufferResizeCallback(GLFWwindow *window, int, int) {
+    auto *app = static_cast<Application *>(glfwGetWindowUserPointer(window));
+    if (app && app->renderer_) {
         app->renderer_->notifyResized();
     }
 }

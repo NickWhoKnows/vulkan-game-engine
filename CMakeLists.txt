@@ -39,28 +39,28 @@ endforeach()
 
 add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 
-add_executable(vlkprogram
+add_executable(engine
     src/main.cpp
     src/app/Application.cpp
     src/vulkan/Context.cpp
     src/vulkan/Renderer.cpp
 )
 
-add_dependencies(vlkprogram shaders)
+add_dependencies(engine shaders)
 
-target_include_directories(vlkprogram
+target_include_directories(engine
     PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${GLM_INCLUDE_DIR}
 )
 
-target_compile_definitions(vlkprogram
+target_compile_definitions(engine
     PRIVATE
     VK_ENABLE_BETA_EXTENSIONS
     SHADER_DIR="${CMAKE_BINARY_DIR}/shaders"
 )
 
-target_link_libraries(vlkprogram
+target_link_libraries(engine
     PRIVATE
     Vulkan::Vulkan
     glfw
